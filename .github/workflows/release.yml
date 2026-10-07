@@ -13,7 +13,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: 版本号（Cargo.toml 为唯一来源）
         shell: bash
@@ -25,10 +25,10 @@ jobs:
       - name: 安装 MSYS2 工具链
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: false
           install: >-
-            mingw-w64-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gcc
             make
             nasm
             xz
@@ -59,7 +59,7 @@ jobs:
           mkdir -p artifacts
           if [ -f Vidly-Setup-${VER4}.exe ]; then cp Vidly-Setup-${VER4}.exe artifacts/
           else cp "Output/Vidly-Setup-${VER4}.exe" artifacts/; fi   # fallback when signing is off
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with: { name: windows, path: artifacts/ }
 
   # ══════════════════════ macOS ══════════════════════
@@ -73,7 +73,7 @@ jobs:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: 版本号
         run: |
@@ -101,14 +101,14 @@ jobs:
         run: |
           mkdir -p artifacts
           cp dist/Vidly-${VER}.dmg artifacts/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with: { name: macos, path: artifacts/ }
 
   # ══════════════════════ Linux ══════════════════════
   linux:
     runs-on: ubuntu-22.04 # 22.04 keeps glibc compatibility broad
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: 版本号
         run: |
@@ -130,7 +130,7 @@ jobs:
         run: |
           mkdir -p artifacts
           cp dist/vidly_${VER}_amd64.deb artifacts/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with: { name: linux, path: artifacts/ }
 
   # ══════════════════════ release ══════════════════════
@@ -139,8 +139,8 @@ jobs:
     needs: [windows, macos, linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
         with: { merge-multiple: true, path: dist }
       - name: 生成 Release
         run: |
