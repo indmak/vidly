@@ -12,6 +12,8 @@ jobs:
   # ══════════════════════ Windows ══════════════════════
   windows:
     runs-on: windows-latest
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,7 +50,7 @@ jobs:
       # ── SignPath pass 1: sign the application binaries ──────────────────────
       # ⚠️ input/output parameter names follow the SignPath action README.
       - name: SignPath 签名（应用文件）
-        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        if: ${{ env.SIGNPATH_API_TOKEN != '' }}
         uses: SignPath/github-action-signpath-action@v1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -58,7 +60,7 @@ jobs:
           input-artifact-path: unsigned.zip
           output-artifact-path: signed.zip
       - name: 解包签名结果回 dist/
-        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        if: ${{ env.SIGNPATH_API_TOKEN != '' }}
         shell: bash
         run: 7z x signed.zip -odist -y
       - name: Inno Setup 打安装包
@@ -68,7 +70,7 @@ jobs:
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DVersion=%VER4% installer.iss
       # ── SignPath pass 2: sign the installer ─────────────────────────────────
       - name: SignPath 签名（安装包）
-        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        if: ${{ env.SIGNPATH_API_TOKEN != '' }}
         uses: SignPath/github-action-signpath-action@v1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -111,7 +113,7 @@ jobs:
       - name: 生成 icns
         run: ./scripts/make-icns.sh
       - name: 导入签名证书到临时 keychain
-        if: ${{ secrets.MACOS_P12_B64 != '' }}
+        if: ${{ env.MACOS_P12_B64 != '' }}
         run: |
           echo -n "$MACOS_P12_B64" | base64 --decode > cert.p12
           security create-keychain -p temp build.keychain
