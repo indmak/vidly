@@ -49,10 +49,11 @@ pub struct Item {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Init(Option<FfmpegPaths>, Config, Vec<history::Entry>),
+    Init(Option<FfmpegPaths>, Config, Vec<history::Entry>, Vec<bool>),
     PickFiles,
     FilesPicked(Vec<PathBuf>),
     FilesDropped(Vec<PathBuf>),
+    FilesScanned(Vec<(PathBuf, u64)>, usize),
     PickOutputDir,
     OutputDirPicked(Option<PathBuf>),
     ResetOutputDir,
@@ -79,10 +80,12 @@ pub enum Message {
     UnhoverItem,
     ShowAbout,
     ShowHistory,
+    HistoryExists(Vec<bool>),
     HideOverlays,
     ClearHistory,
     OpenUrl(String),
     OpenPath(PathBuf),
+    OpenResult(Result<(), String>),
     DismissStatus,
     OpenLogs,
     WindowResized(f32, f32),
@@ -101,32 +104,33 @@ pub struct App {
     about_open: bool,
     history_open: bool,
     history: Vec<history::Entry>,
+    history_exists: Vec<bool>, // cached output-existence, computed off the render path
 }
 
 impl App {
     pub fn init() -> Task<Message> {
         Task::perform(
             async {
-                (
-                    convert::find_ffmpeg(),
-                    config::load().await,
-                    history::load().await,
-                )
+                let hist = history::load().await;
+                // Compute output existence off the UI thread.
+                let exists = hist.iter().map(|e| e.output.is_file()).collect::<Vec<_>>();
+                (convert::find_ffmpeg(), config::load().await, hist, exists)
             },
-            |(ffmpeg, cfg, hist)| Message::Init(ffmpeg, cfg, hist),
+            |(ffmpeg, cfg, hist, exists)| Message::Init(ffmpeg, cfg, hist, exists),
         )
     }
 
     // ---------- update ----------
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Init(paths, mut cfg, hist) => {
+            Message::Init(paths, mut cfg, hist, exists) => {
                 cfg.concurrency = cfg.concurrency.clamp(1, 8);
                 theme::set_mode(cfg.theme);
                 i18n::set_lang(cfg.language.resolve());
                 self.config = cfg;
                 self.ffmpeg = paths;
                 self.history = hist;
+                self.history_exists = exists;
                 match &self.ffmpeg {
                     Some(p) => tracing::info!(ffmpeg = %p.ffmpeg.display(), "FFmpeg 就绪"),
                     None => {
@@ -137,8 +141,12 @@ impl App {
                 Task::none()
             }
             Message::PickFiles => Task::perform(pick_files(), Message::FilesPicked),
-            Message::FilesPicked(paths) | Message::FilesDropped(paths) => {
-                self.add_files(paths);
+            Message::FilesPicked(paths) | Message::FilesDropped(paths) => Task::perform(
+                scan_files(paths),
+                |(files, ignored)| Message::FilesScanned(files, ignored),
+            ),
+            Message::FilesScanned(files, ignored) => {
+                self.enqueue_scanned(files, ignored);
                 Task::none()
             }
             Message::PickOutputDir => Task::perform(pick_dir(), Message::OutputDirPicked),
@@ -299,17 +307,21 @@ impl App {
                             at: history::now_secs(),
                         },
                     );
+                    // Cache the new row's existence (one stat, not per frame).
+                    let exists = self
+                        .history
+                        .first()
+                        .map(|e| e.output.is_file())
+                        .unwrap_or(false);
+                    self.history_exists.insert(0, exists);
+                    self.history_exists.truncate(self.history.len());
                 }
                 Task::batch([self.pump(), self.save_history()]) // one slot freed; persist history
             }
-            Message::OpenOutput(id) => {
-                if let Some(item) = self.items.iter().find(|i| i.id == id) {
-                    if let Err(e) = opener::reveal(&item.output) {
-                        self.status = i18n::t("open_failed").replace("{e}", &e.to_string());
-                    }
-                }
-                Task::none()
-            }
+            Message::OpenOutput(id) => match self.items.iter().find(|i| i.id == id) {
+                Some(item) => Task::perform(reveal_path(item.output.clone()), Message::OpenResult),
+                None => Task::none(),
+            },
             Message::HoverItem(id) => {
                 self.hovered = Some(id);
                 Task::none()
@@ -326,6 +338,15 @@ impl App {
             Message::ShowHistory => {
                 self.history_open = true;
                 self.about_open = false;
+                // Compute output existence off the UI thread.
+                let hist = self.history.clone();
+                Task::perform(
+                    async move { hist.iter().map(|e| e.output.is_file()).collect::<Vec<_>>() },
+                    Message::HistoryExists,
+                )
+            }
+            Message::HistoryExists(exists) => {
+                self.history_exists = exists;
                 Task::none()
             }
             Message::HideOverlays => {
@@ -335,40 +356,35 @@ impl App {
             }
             Message::ClearHistory => {
                 self.history.clear();
+                self.history_exists.clear();
                 self.save_history()
             }
-            Message::OpenPath(path) => {
-                if let Err(e) = opener::reveal(&path) {
-                    self.status = i18n::t("open_failed").replace("{e}", &e.to_string());
-                }
+            Message::OpenPath(path) => Task::perform(reveal_path(path), Message::OpenResult),
+            Message::OpenResult(Ok(())) => Task::none(),
+            Message::OpenResult(Err(e)) => {
+                self.status = i18n::t("open_failed").replace("{e}", &e);
                 Task::none()
             }
             Message::OpenUrl(url) => {
                 // Only ever open web links; never hand arbitrary schemes to the OS opener.
                 if url.starts_with("https://") || url.starts_with("http://") {
-                    if let Err(e) = opener::open(&url) {
-                        self.status = i18n::t("open_link_failed").replace("{e}", &e.to_string());
-                    }
+                    Task::perform(open_url(url), Message::OpenResult)
                 } else {
                     tracing::warn!(%url, "拒绝打开非 http(s) 链接");
+                    Task::none()
                 }
-                Task::none()
             }
             Message::DismissStatus => {
                 self.status.clear();
                 Task::none()
             }
-            Message::OpenLogs => {
-                match config::log_dir() {
-                    Some(dir) => {
-                        if let Err(e) = opener::reveal(&dir) {
-                            self.status = i18n::t("logs_open_failed").replace("{e}", &e.to_string());
-                        }
-                    }
-                    None => self.status = i18n::t("logs_dir_missing"),
+            Message::OpenLogs => match config::log_dir() {
+                Some(dir) => Task::perform(reveal_path(dir), Message::OpenResult),
+                None => {
+                    self.status = i18n::t("logs_dir_missing");
+                    Task::none()
                 }
-                Task::none()
-            }
+            },
             Message::WindowResized(w, h) => {
                 self.config.window_size = Some((w, h)); // persisted when the window closes
                 Task::none()
@@ -459,57 +475,33 @@ impl App {
         }
     }
 
-    fn add_files(&mut self, paths: Vec<PathBuf>) {
-        // Bounds for folder expansion: guard against symlink cycles and huge trees.
-        const MAX_DIR_DEPTH: u32 = 32;
-        const MAX_ADDED: usize = 100_000;
-
-        let mut ignored = 0usize;
+    /// Enqueues files already scanned off the UI thread (pure in-memory work).
+    fn enqueue_scanned(&mut self, files: Vec<(PathBuf, u64)>, ignored: usize) {
+        const MAX_ITEMS: usize = 2000; // keep the (non-virtualized) list responsive
+        let mut existing: HashSet<PathBuf> =
+            self.items.iter().map(|i| i.input.clone()).collect();
         let mut added = 0usize;
-        let mut visited_dirs: HashSet<PathBuf> = HashSet::new();
-        // dropped folders get expanded automatically
-        let mut queue: VecDeque<(PathBuf, u32)> =
-            paths.into_iter().map(|p| (p, 0)).collect();
-        while let Some((p, depth)) = queue.pop_front() {
-            if added >= MAX_ADDED {
-                tracing::warn!(MAX_ADDED, "文件数量达到上限，停止展开");
+        for (p, size) in files {
+            if self.items.len() >= MAX_ITEMS {
+                tracing::warn!(MAX_ITEMS, "队列达到上限，忽略其余文件");
                 break;
             }
-            if p.is_dir() {
-                if depth >= MAX_DIR_DEPTH {
-                    continue;
-                }
-                // Canonicalize to detect symlink cycles (same dir reached twice).
-                if let Ok(real) = p.canonicalize() {
-                    if !visited_dirs.insert(real) {
-                        continue;
-                    }
-                }
-                if let Ok(entries) = std::fs::read_dir(&p) {
-                    for e in entries.flatten() {
-                        queue.push_back((e.path(), depth + 1));
-                    }
-                }
-            } else if util::is_supported(&p) {
-                if self.items.iter().any(|i| i.input == p) {
-                    continue; // de-duplicate
-                }
-                let target = Container::default_for(&p);
-                let output = util::planned_output(&p, self.config.output_dir.as_deref(), resolve_ext(target, &p));
-                let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                self.items.push(Item {
-                    id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
-                    input: p,
-                    output,
-                    target,
-                    size,
-                    started: None,
-                    phase: Phase::Queued,
-                });
-                added += 1;
-            } else {
-                ignored += 1;
+            if !existing.insert(p.clone()) {
+                continue; // already queued
             }
+            let target = Container::default_for(&p);
+            let output =
+                util::planned_output(&p, self.config.output_dir.as_deref(), resolve_ext(target, &p));
+            self.items.push(Item {
+                id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                input: p,
+                output,
+                target,
+                size,
+                started: None,
+                phase: Phase::Queued,
+            });
+            added += 1;
         }
         if added > 0 || ignored > 0 {
             tracing::info!(added, ignored, "文件入队");
@@ -836,8 +828,16 @@ impl App {
                 .into()
         } else {
             scrollable(
-                Column::with_children(self.history.iter().map(history_row).collect::<Vec<_>>())
-                    .spacing(10),
+                Column::with_children(
+                    self.history
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| {
+                            history_row(e, self.history_exists.get(i).copied().unwrap_or(false))
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .spacing(10),
             )
             .height(Length::Fill)
             .into()
@@ -1020,7 +1020,7 @@ fn icon_label(name: &str, label: String, color: Color) -> Element<'static, Messa
         .into()
 }
 
-fn history_row(entry: &history::Entry) -> Element<'static, Message> {
+fn history_row(entry: &history::Entry, output_exists: bool) -> Element<'static, Message> {
     let k = theme::tokens();
     let (icon_name, icon_color, status) = match entry.status {
         history::Status::Done => ("check-circle", k.success, i18n::t("hist_done")),
@@ -1041,7 +1041,7 @@ fn history_row(entry: &history::Entry) -> Element<'static, Message> {
     let meta = format!("{} · {}", rel_time(entry.at), util::human_size(entry.size));
 
     let mut actions = row![].spacing(6);
-    if entry.output.is_file() {
+    if output_exists {
         actions = actions.push(
             button(icon_label("folder-open", i18n::t("act_open"), k.text_primary))
                 .on_press(Message::OpenPath(entry.output.clone()))
@@ -1245,6 +1245,73 @@ fn item_view(item: &Item, hovered: bool) -> Element<'static, Message> {
         .on_enter(Message::HoverItem(item.id))
         .on_exit(Message::UnhoverItem)
         .into()
+}
+
+/// Scans dropped paths on a blocking thread (never on the UI thread).
+async fn scan_files(paths: Vec<PathBuf>) -> (Vec<(PathBuf, u64)>, usize) {
+    tokio::task::spawn_blocking(move || scan_files_blocking(paths))
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %e, "扫描文件失败");
+            (Vec::new(), 0)
+        })
+}
+
+fn scan_files_blocking(paths: Vec<PathBuf>) -> (Vec<(PathBuf, u64)>, usize) {
+    // Bounds for folder expansion: guard against symlink cycles and huge trees.
+    const MAX_DIR_DEPTH: u32 = 32;
+    // The list is not virtualized (the whole queue is rebuilt each frame), so cap
+    // the count to keep rendering responsive.
+    const MAX_FILES: usize = 2000;
+
+    let mut files = Vec::new();
+    let mut ignored = 0usize;
+    let mut visited_dirs: HashSet<PathBuf> = HashSet::new();
+    let mut queue: VecDeque<(PathBuf, u32)> = paths.into_iter().map(|p| (p, 0)).collect();
+    while let Some((p, depth)) = queue.pop_front() {
+        if files.len() >= MAX_FILES {
+            tracing::warn!(MAX_FILES, "文件数量达到上限，停止展开");
+            break;
+        }
+        if p.is_dir() {
+            if depth >= MAX_DIR_DEPTH {
+                continue;
+            }
+            // Canonicalize to detect symlink cycles (same dir reached twice).
+            if let Ok(real) = p.canonicalize() {
+                if !visited_dirs.insert(real) {
+                    continue;
+                }
+            }
+            if let Ok(entries) = std::fs::read_dir(&p) {
+                for e in entries.flatten() {
+                    queue.push_back((e.path(), depth + 1));
+                }
+            }
+        } else if util::is_supported(&p) {
+            let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+            files.push((p, size));
+        } else {
+            ignored += 1;
+        }
+    }
+    (files, ignored)
+}
+
+/// Reveals a path in the OS file manager without blocking the UI thread.
+async fn reveal_path(path: PathBuf) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || opener::reveal(&path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Opens a URL without blocking the UI thread.
+async fn open_url(url: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || opener::open(&url))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 async fn pick_files() -> Vec<PathBuf> {

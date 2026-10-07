@@ -4,7 +4,8 @@
 // UI yet (e.g. hover/pressed states, success progress bar), so unused items are fine.
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use iced::{
     overlay::menu,
@@ -40,6 +41,10 @@ impl std::fmt::Display for ThemeMode {
 }
 
 static MODE: AtomicU8 = AtomicU8::new(0); // 0=Dark 1=Light 2=System
+// Cached result of OS theme detection (avoid querying the OS on every frame).
+static RESOLVED: AtomicU8 = AtomicU8::new(0); // 0=Dark 1=Light
+static RESOLVED_AT: AtomicU64 = AtomicU64::new(0); // unix secs of last detection
+const RESOLVE_TTL_SECS: u64 = 3;
 
 fn encode(mode: ThemeMode) -> u8 {
     match mode {
@@ -51,6 +56,7 @@ fn encode(mode: ThemeMode) -> u8 {
 
 pub fn set_mode(mode: ThemeMode) {
     MODE.store(encode(mode), Ordering::Relaxed);
+    RESOLVED_AT.store(0, Ordering::Relaxed); // force re-detection next time
 }
 
 pub fn mode() -> ThemeMode {
@@ -61,13 +67,31 @@ pub fn mode() -> ThemeMode {
     }
 }
 
-/// Resolves `System` to the actual OS preference.
+/// Resolves `System` to the actual OS preference (cached for `RESOLVE_TTL_SECS`,
+/// so rendering never hits the OS on every frame).
 pub fn resolved() -> ThemeMode {
     match mode() {
-        ThemeMode::System => match dark_light::detect() {
-            dark_light::Mode::Light => ThemeMode::Light,
-            _ => ThemeMode::Dark,
-        },
+        ThemeMode::System => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let last = RESOLVED_AT.load(Ordering::Relaxed);
+            if last != 0 && now.saturating_sub(last) < RESOLVE_TTL_SECS {
+                return if RESOLVED.load(Ordering::Relaxed) == 1 {
+                    ThemeMode::Light
+                } else {
+                    ThemeMode::Dark
+                };
+            }
+            let detected = match dark_light::detect() {
+                dark_light::Mode::Light => ThemeMode::Light,
+                _ => ThemeMode::Dark,
+            };
+            RESOLVED.store(if detected == ThemeMode::Light { 1 } else { 0 }, Ordering::Relaxed);
+            RESOLVED_AT.store(now, Ordering::Relaxed);
+            detected
+        }
         other => other,
     }
 }
