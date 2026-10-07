@@ -37,7 +37,7 @@ impl ThemeMode {
 
 impl std::fmt::Display for ThemeMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&crate::i18n::t(self.label()))
+        f.write_str(crate::i18n::t(self.label()))
     }
 }
 

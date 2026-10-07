@@ -14,7 +14,7 @@ pub enum OverwritePolicy {
 
 impl std::fmt::Display for OverwritePolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&i18n::t(match self {
+        f.write_str(i18n::t(match self {
             OverwritePolicy::Rename => "ow_rename",
             OverwritePolicy::Overwrite => "ow_overwrite",
             OverwritePolicy::Skip => "ow_skip",
@@ -66,7 +66,7 @@ impl Container {
 
 impl std::fmt::Display for Container {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&i18n::t(self.key()))
+        f.write_str(i18n::t(self.key()))
     }
 }
 

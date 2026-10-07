@@ -139,7 +139,7 @@ impl App {
                     Some(p) => tracing::info!(ffmpeg = %p.ffmpeg.display(), "FFmpeg 就绪"),
                     None => {
                         tracing::warn!("未检测到 ffmpeg / ffprobe");
-                        self.status = i18n::t("no_ffmpeg_status");
+                        self.status = i18n::t("no_ffmpeg_status").to_string();
                     }
                 }
                 Task::none()
@@ -385,7 +385,7 @@ impl App {
             Message::OpenLogs => match config::log_dir() {
                 Some(dir) => Task::perform(reveal_path(dir), Message::OpenResult),
                 None => {
-                    self.status = i18n::t("logs_dir_missing");
+                    self.status = i18n::t("logs_dir_missing").to_string();
                     Task::none()
                 }
             },
@@ -405,7 +405,7 @@ impl App {
     // ---------- scheduling ----------
     fn start(&mut self) -> Task<Message> {
         if self.ffmpeg.is_none() {
-            self.status = i18n::t("cannot_convert");
+            self.status = i18n::t("cannot_convert").to_string();
             return Task::none();
         }
         if !self.items.iter().any(|i| matches!(i.phase, Phase::Queued)) {
@@ -873,13 +873,17 @@ impl App {
     }
 
     fn ffmpeg_badge(&self) -> String {
-        if self.ffmpeg.is_some() { i18n::t("ffmpeg_ready") } else { i18n::t("ffmpeg_missing") }
+        if self.ffmpeg.is_some() {
+            i18n::t("ffmpeg_ready").to_string()
+        } else {
+            i18n::t("ffmpeg_missing").to_string()
+        }
     }
 
     fn output_dir_label(&self) -> String {
         match &self.config.output_dir {
             Some(d) => d.display().to_string(),
-            None => i18n::t("output_same_dir"),
+            None => i18n::t("output_same_dir").to_string(),
         }
     }
 
@@ -901,7 +905,7 @@ impl App {
 
     fn summary(&self) -> String {
         if self.items.is_empty() {
-            return i18n::t("ready");
+            return i18n::t("ready").to_string();
         }
         let done = self.items.iter().filter(|i| matches!(i.phase, Phase::Done { .. })).count();
         let failed = self.items.iter().filter(|i| matches!(i.phase, Phase::Failed(_))).count();
@@ -1050,7 +1054,7 @@ fn spawn_conversion(
 }
 
 /// Icon + label used as button content.
-fn icon_label(name: &str, label: String, color: Color) -> Element<'static, Message> {
+fn icon_label(name: &str, label: &'static str, color: Color) -> Element<'static, Message> {
     row![icons::icon(name, 15.0, color), text(label).size(13)]
         .spacing(6)
         .align_y(Vertical::Center)
@@ -1060,10 +1064,10 @@ fn icon_label(name: &str, label: String, color: Color) -> Element<'static, Messa
 fn history_row(entry: &history::Entry, output_exists: bool) -> Element<'static, Message> {
     let k = theme::tokens();
     let (icon_name, icon_color, status) = match entry.status {
-        history::Status::Done => ("check-circle", k.success, i18n::t("hist_done")),
-        history::Status::Failed => ("x-circle", k.error, i18n::t("hist_failed")),
-        history::Status::Skipped => ("skip-forward", k.warning, i18n::t("st_skipped")),
-        history::Status::Canceled => ("ban", k.text_disabled, i18n::t("st_canceled")),
+        history::Status::Done => ("check-circle", k.success, i18n::t("hist_done").to_string()),
+        history::Status::Failed => ("x-circle", k.error, i18n::t("hist_failed").to_string()),
+        history::Status::Skipped => ("skip-forward", k.warning, i18n::t("st_skipped").to_string()),
+        history::Status::Canceled => ("ban", k.text_disabled, i18n::t("st_canceled").to_string()),
     };
     let name = entry
         .input
@@ -1116,7 +1120,7 @@ fn history_row(entry: &history::Entry, output_exists: bool) -> Element<'static, 
 fn rel_time(at: u64) -> String {
     let delta = history::now_secs().saturating_sub(at);
     if delta < 60 {
-        i18n::t("time_now")
+        i18n::t("time_now").to_string()
     } else if delta < 3600 {
         i18n::t("time_min").replace("{n}", &(delta / 60).to_string())
     } else if delta < 86_400 {
@@ -1145,14 +1149,14 @@ fn set_output(item: &mut Item, output: PathBuf) {
 fn item_view(item: &Item, hovered: bool) -> Element<'_, Message> {
     let k = theme::tokens();
     let (icon_name, status) = match &item.phase {
-        Phase::Queued => ("clock", i18n::t("st_waiting")),
-        Phase::Running { .. } => ("loader", i18n::t("st_converting")),
+        Phase::Queued => ("clock", i18n::t("st_waiting").to_string()),
+        Phase::Running { .. } => ("loader", i18n::t("st_converting").to_string()),
         Phase::Done { secs } => {
             ("check-circle", i18n::t("st_done").replace("{secs}", &format!("{secs:.1}")))
         }
         Phase::Failed(e) => ("x-circle", e.clone()),
-        Phase::Canceled => ("ban", i18n::t("st_canceled")),
-        Phase::Skipped => ("skip-forward", i18n::t("st_skipped")),
+        Phase::Canceled => ("ban", i18n::t("st_canceled").to_string()),
+        Phase::Skipped => ("skip-forward", i18n::t("st_skipped").to_string()),
     };
     let icon_color = match &item.phase {
         Phase::Queued => k.text_secondary,

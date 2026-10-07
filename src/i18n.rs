@@ -128,7 +128,7 @@ impl LangPref {
 impl std::fmt::Display for LangPref {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
-            None => f.write_str(&t("lang_auto")),
+            None => f.write_str(t("lang_auto")),
             Some(l) => f.write_str(l.endonym()),
         }
     }
@@ -144,8 +144,8 @@ pub fn lang() -> Lang {
     Lang::from_index(LANG.load(Ordering::Relaxed))
 }
 
-fn tables() -> &'static HashMap<Lang, HashMap<String, String>> {
-    static TABLES: OnceLock<HashMap<Lang, HashMap<String, String>>> = OnceLock::new();
+fn tables() -> &'static HashMap<Lang, HashMap<&'static str, &'static str>> {
+    static TABLES: OnceLock<HashMap<Lang, HashMap<&'static str, &'static str>>> = OnceLock::new();
     TABLES.get_or_init(|| {
         let mut m = HashMap::new();
         m.insert(Lang::En, parse(include_str!("i18n/en.json")));
@@ -160,24 +160,35 @@ fn tables() -> &'static HashMap<Lang, HashMap<String, String>> {
     })
 }
 
-fn parse(src: &str) -> HashMap<String, String> {
-    serde_json::from_str(src).expect("invalid embedded language table")
+fn parse(src: &str) -> HashMap<&'static str, &'static str> {
+    let owned: HashMap<String, String> =
+        serde_json::from_str(src).expect("invalid embedded language table");
+    // Leak once so lookups return `&'static str` with zero allocation per call.
+    owned
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                &*Box::leak(k.into_boxed_str()),
+                &*Box::leak(v.into_boxed_str()),
+            )
+        })
+        .collect()
 }
 
-/// Translate `key` into the active language.
-pub fn t(key: &str) -> String {
+/// Translate `key` into the active language (no allocation).
+pub fn t(key: &'static str) -> &'static str {
     t_lang(lang(), key)
 }
 
 /// Translate `key` into a specific language (falls back to English, then the key).
-pub fn t_lang(lang: Lang, key: &str) -> String {
+pub fn t_lang(lang: Lang, key: &'static str) -> &'static str {
     let tables = tables();
     tables
         .get(&lang)
         .and_then(|m| m.get(key))
-        .or_else(|| tables.get(&Lang::En).and_then(|m| m.get(key)))
-        .cloned()
-        .unwrap_or_else(|| key.to_string())
+        .copied()
+        .or_else(|| tables.get(&Lang::En).and_then(|m| m.get(key)).copied())
+        .unwrap_or(key)
 }
 
 #[cfg(test)]
