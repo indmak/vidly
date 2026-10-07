@@ -29,13 +29,12 @@ cd "ffmpeg-${VER}"
     --disable-network \
     --disable-autodetect \
     --disable-everything \
-    --enable-programs \
     --enable-ffmpeg \
     --enable-ffprobe \
     --enable-protocol=file,pipe \
-    --enable-demuxer=mov,matroska,webm,mpegts,avi \
+    --enable-demuxer=mov,matroska,mpegts,avi \
     --enable-muxer=mov,mp4,matroska,webm,ipod \
-    --enable-bsf=null,extract_extradata,aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,vp9_superframe \
+    --enable-bsf=null,extract_extradata,aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb \
     --enable-parser=aac,ac3,mpegaudio,h264,hevc,vp8,vp9,av1,opus,vorbis
 
 make -j"$JOBS"

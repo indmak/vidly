@@ -12,8 +12,6 @@ jobs:
   # ══════════════════════ Windows ══════════════════════
   windows:
     runs-on: windows-latest
-    env:
-      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -37,7 +35,7 @@ jobs:
             curl
       - name: 构建极简 LGPL ffmpeg
         shell: msys2 {0}
-        run: ./scripts/build-ffmpeg-min.sh
+        run: bash scripts/build-ffmpeg-min.sh
       - name: 组装 dist/
         shell: bash
         run: |
@@ -47,38 +45,14 @@ jobs:
           cp out/bin/LICENSE-ffmpeg.txt dist/LICENSE-ffmpeg.txt
           cp target/release/vidly.exe dist/
           (cd dist && 7z a ../unsigned.zip vidly.exe ffmpeg.exe ffprobe.exe)
-      # ── SignPath pass 1: sign the application binaries ──────────────────────
-      # ⚠️ input/output parameter names follow the SignPath action README.
-      - name: SignPath 签名（应用文件）
-        if: ${{ env.SIGNPATH_API_TOKEN != '' }}
-        uses: SignPath/github-action-signpath-action@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
-          project-slug: vidly
-          signing-policy-slug: release-signing
-          input-artifact-path: unsigned.zip
-          output-artifact-path: signed.zip
-      - name: 解包签名结果回 dist/
-        if: ${{ env.SIGNPATH_API_TOKEN != '' }}
-        shell: bash
-        run: 7z x signed.zip -odist -y
+      # ── 代码签名（SignPath，待账号审批后启用）────────────────────────────────
+      # 审批通过后：在仓库加 SIGNPATH_API_TOKEN / SIGNPATH_ORG_ID 两个 Secret，
+      # 再按 SignPath 官方 action 文档补回「签名 dist/ → 解包 → 签安装包」两段。
       - name: Inno Setup 打安装包
         shell: cmd
         run: |
           choco install innosetup -y --no-progress || exit /b 0
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DVersion=%VER4% installer.iss
-      # ── SignPath pass 2: sign the installer ─────────────────────────────────
-      - name: SignPath 签名（安装包）
-        if: ${{ env.SIGNPATH_API_TOKEN != '' }}
-        uses: SignPath/github-action-signpath-action@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
-          project-slug: vidly
-          signing-policy-slug: release-signing
-          input-artifact-path: Output/Vidly-Setup-${{ env.VER4 }}.exe
-          output-artifact-path: Vidly-Setup-${{ env.VER4 }}.exe
       - name: 收集产物
         shell: bash
         run: |
@@ -108,10 +82,10 @@ jobs:
       - name: 构建 LGPL ffmpeg（极简）
         run: |
           brew install nasm 2>/dev/null || true
-          ./scripts/build-ffmpeg-min.sh
+          bash scripts/build-ffmpeg-min.sh
       - run: cargo build --release
       - name: 生成 icns
-        run: ./scripts/make-icns.sh
+        run: bash scripts/make-icns.sh
       - name: 导入签名证书到临时 keychain
         if: ${{ env.MACOS_P12_B64 != '' }}
         run: |
@@ -122,7 +96,7 @@ jobs:
           security import cert.p12 -k build.keychain \
             -P "$MACOS_P12_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -k temp build.keychain
-      - run: chmod +x scripts/package-macos.sh && ./scripts/package-macos.sh "$VER"
+      - run: bash scripts/package-macos.sh "$VER"
       - name: 收集产物
         run: |
           mkdir -p artifacts
@@ -148,12 +122,10 @@ jobs:
       - name: 构建极简 LGPL ffmpeg
         run: |
           sudo apt-get install -y nasm
-          chmod +x scripts/build-ffmpeg-min.sh
-          ./scripts/build-ffmpeg-min.sh
+          bash scripts/build-ffmpeg-min.sh
       - name: 组装 deb
         run: |
-          chmod +x scripts/package-deb.sh
-          ./scripts/package-deb.sh "$VER" amd64
+          bash scripts/package-deb.sh "$VER" amd64
       - name: 收集产物
         run: |
           mkdir -p artifacts
