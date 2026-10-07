@@ -17,7 +17,8 @@ Remux only — no re-encoding. Same quality, near file-copy speed.
 [**Download**](#download) ·
 [**Features**](#features) ·
 [**Build**](#build-from-source) ·
-[**Docs**](docs/)
+[**Tech Stack**](docs/TECH_STACK.md) ·
+[**UI Design**](docs/UI_DESIGN.md)
 
 </div>
 
@@ -146,8 +147,7 @@ cargo test
 Pushing a `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml),
 which builds all three platforms on GitHub-hosted runners, signs/notarizes (when
 secrets are configured), and publishes to GitHub Releases. See
-[`docs/开源打包构建.md`](docs/开源打包构建.md) and
-[`docs/macOS 签名配置.md`](docs/macOS 签名配置.md).
+[`docs/TECH_STACK.md`](docs/TECH_STACK.md).
 
 - `installer.iss` — Windows Inno Setup installer (bundles FFmpeg, skips if present)
 - `scripts/build-ffmpeg-min.sh` — minimal LGPL FFmpeg for all platforms
