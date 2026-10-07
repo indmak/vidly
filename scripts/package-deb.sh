@@ -45,7 +45,7 @@ EOF
 cp assets/vidly-256.png "$ROOT/usr/share/icons/hicolor/256x256/apps/vidly.png"
 
 # ── docs & licenses (LGPL compliance) ───────────────────────────────────────
-# Prefer the license text shipped with the bundled build (BtbN -lgpl = LGPL v3).
+# Prefer the license text shipped with the self-built (LGPL v2.1+) FFmpeg.
 if [ -f out/bin/LICENSE-ffmpeg.txt ]; then
     cp out/bin/LICENSE-ffmpeg.txt "$ROOT/usr/share/doc/vidly/LICENSE-ffmpeg.txt"
 else

@@ -92,6 +92,14 @@ English · Français · Deutsch · Español · Русский · 日本語 · �
 Follows the system locale; unknown locales fall back to English. Change it anytime
 in the settings row.
 
+## Privacy
+
+Vidly runs entirely on your machine and makes **no network requests**. Your
+settings, conversion history and diagnostic logs are stored locally under your
+user config directory (`%APPDATA%\vidly` on Windows, `~/.config/vidly` on Linux,
+`~/Library/Application Support/vidly` on macOS). Logs and history record local
+file paths in plain text — delete that folder to clear them.
+
 ## Tech stack
 
 Vidly is built with Rust and a small, focused set of libraries:

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -344,8 +344,13 @@ impl App {
                 Task::none()
             }
             Message::OpenUrl(url) => {
-                if let Err(e) = opener::open(&url) {
-                    self.status = i18n::t("open_link_failed").replace("{e}", &e.to_string());
+                // Only ever open web links; never hand arbitrary schemes to the OS opener.
+                if url.starts_with("https://") || url.starts_with("http://") {
+                    if let Err(e) = opener::open(&url) {
+                        self.status = i18n::t("open_link_failed").replace("{e}", &e.to_string());
+                    }
+                } else {
+                    tracing::warn!(%url, "拒绝打开非 http(s) 链接");
                 }
                 Task::none()
             }
@@ -406,6 +411,11 @@ impl App {
                 break;
             };
             let item = self.items.iter_mut().find(|i| i.id == id).unwrap();
+            // Never write over the source file itself (that would corrupt / destroy
+            // the original) — force a unique name regardless of the overwrite policy.
+            if item.output == item.input {
+                item.output = util::unique_path(item.output.clone());
+            }
             // Apply the overwrite policy only now.
             match self.config.overwrite {
                 OverwritePolicy::Skip if item.output.exists() => {
@@ -450,14 +460,34 @@ impl App {
     }
 
     fn add_files(&mut self, paths: Vec<PathBuf>) {
+        // Bounds for folder expansion: guard against symlink cycles and huge trees.
+        const MAX_DIR_DEPTH: u32 = 32;
+        const MAX_ADDED: usize = 100_000;
+
         let mut ignored = 0usize;
         let mut added = 0usize;
-        let mut queue: VecDeque<PathBuf> = paths.into(); // dropped folders get expanded automatically
-        while let Some(p) = queue.pop_front() {
+        let mut visited_dirs: HashSet<PathBuf> = HashSet::new();
+        // dropped folders get expanded automatically
+        let mut queue: VecDeque<(PathBuf, u32)> =
+            paths.into_iter().map(|p| (p, 0)).collect();
+        while let Some((p, depth)) = queue.pop_front() {
+            if added >= MAX_ADDED {
+                tracing::warn!(MAX_ADDED, "文件数量达到上限，停止展开");
+                break;
+            }
             if p.is_dir() {
+                if depth >= MAX_DIR_DEPTH {
+                    continue;
+                }
+                // Canonicalize to detect symlink cycles (same dir reached twice).
+                if let Ok(real) = p.canonicalize() {
+                    if !visited_dirs.insert(real) {
+                        continue;
+                    }
+                }
                 if let Ok(entries) = std::fs::read_dir(&p) {
                     for e in entries.flatten() {
-                        queue.push_back(e.path());
+                        queue.push_back((e.path(), depth + 1));
                     }
                 }
             } else if util::is_supported(&p) {
