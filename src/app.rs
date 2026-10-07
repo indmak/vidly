@@ -8,8 +8,8 @@ use futures::SinkExt;
 use iced::{
     alignment::{Horizontal, Vertical},
     widget::{
-        button, checkbox, column, container, horizontal_space, mouse_area, pick_list, progress_bar,
-        row, scrollable, slider, text, tooltip, Column,
+        button, checkbox, column, container, horizontal_space, lazy, mouse_area, pick_list,
+        progress_bar, row, scrollable, slider, text, tooltip, Column,
     },
     Border, Color, Element, Font, Length, Subscription, Task, Theme,
 };
@@ -728,7 +728,12 @@ impl App {
                 Column::with_children(
                     self.items
                         .iter()
-                        .map(|i| item_view(i, self.hovered == Some(i.id)))
+                        .map(|i| {
+                            let hovered = self.hovered == Some(i.id);
+                            // `lazy` caches the row element and only rebuilds it when
+                            // the item (or its hover state) actually changes.
+                            lazy(item_key(i, hovered), move |_| item_view(i, hovered)).into()
+                        })
                         .collect::<Vec<_>>(),
                 )
                 .spacing(10),
@@ -1137,6 +1142,35 @@ fn resolve_ext(target: Container, input: &Path) -> &'static str {
     }
 }
 
+/// Hash of everything that affects an item row's rendering. Used as the `lazy`
+/// dependency so unchanged rows are not rebuilt each frame.
+fn item_key(item: &Item, hovered: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    item.id.hash(&mut h);
+    hovered.hash(&mut h);
+    item.out_name.hash(&mut h);
+    (item.target as u8).hash(&mut h);
+    match &item.phase {
+        Phase::Queued => 0u8.hash(&mut h),
+        Phase::Running { progress } => {
+            1u8.hash(&mut h);
+            progress.to_bits().hash(&mut h);
+        }
+        Phase::Done { secs } => {
+            2u8.hash(&mut h);
+            secs.to_bits().hash(&mut h);
+        }
+        Phase::Failed(e) => {
+            3u8.hash(&mut h);
+            e.hash(&mut h);
+        }
+        Phase::Canceled => 4u8.hash(&mut h),
+        Phase::Skipped => 5u8.hash(&mut h),
+    }
+    h.finish()
+}
+
 /// Sets an item's output path and keeps the cached display name in sync.
 fn set_output(item: &mut Item, output: PathBuf) {
     item.out_name = output
@@ -1146,7 +1180,7 @@ fn set_output(item: &mut Item, output: PathBuf) {
     item.output = output;
 }
 
-fn item_view(item: &Item, hovered: bool) -> Element<'_, Message> {
+fn item_view(item: &Item, hovered: bool) -> Element<'static, Message> {
     let k = theme::tokens();
     let (icon_name, status) = match &item.phase {
         Phase::Queued => ("clock", i18n::t("st_waiting").to_string()),
@@ -1166,7 +1200,7 @@ fn item_view(item: &Item, hovered: bool) -> Element<'_, Message> {
         Phase::Canceled => k.text_disabled,
         Phase::Skipped => k.warning,
     };
-    let info: Element<'_, Message> = match &item.phase {
+    let info: Element<'static, Message> = match &item.phase {
         Phase::Running { progress } => {
             let p = *progress;
             let eta = item.started.map(|s| {
@@ -1194,7 +1228,7 @@ fn item_view(item: &Item, hovered: bool) -> Element<'_, Message> {
             .spacing(2)
             .into()
         }
-        _ => text(item.path_label.as_str())
+        _ => text(item.path_label.clone())
             .size(11)
             .width(Length::Fill)
             .wrapping(text::Wrapping::Word)

@@ -1,11 +1,38 @@
 //! Embedded monochrome SVG icons (Lucide-style), tinted per use.
 //!
 //! The SVGs live in `assets/icons/` and are embedded at compile time, so no
-//! runtime asset packaging is needed.
+//! runtime asset packaging is needed. `Handle`s are built once and cached so
+//! repeated rendering never re-hashes/re-allocates them.
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
 use iced::{widget::svg, Color};
 
-pub fn handle(name: &str) -> svg::Handle {
-    let bytes: &'static [u8] = match name {
+const NAMES: &[&str] = &[
+    "plus",
+    "x",
+    "folder",
+    "folder-open",
+    "rotate-ccw",
+    "rotate-cw",
+    "history",
+    "file-text",
+    "info",
+    "trash",
+    "play",
+    "clock",
+    "loader",
+    "check-circle",
+    "x-circle",
+    "ban",
+    "skip-forward",
+    "download",
+    "alert-triangle",
+    "check",
+];
+
+fn bytes(name: &str) -> &'static [u8] {
+    match name {
         "plus" => include_bytes!("../assets/icons/plus.svg"),
         "x" => include_bytes!("../assets/icons/x.svg"),
         "folder" => include_bytes!("../assets/icons/folder.svg"),
@@ -27,8 +54,22 @@ pub fn handle(name: &str) -> svg::Handle {
         "alert-triangle" => include_bytes!("../assets/icons/alert-triangle.svg"),
         "check" => include_bytes!("../assets/icons/check.svg"),
         _ => include_bytes!("../assets/icons/x.svg"),
-    };
-    svg::Handle::from_memory(bytes)
+    }
+}
+
+/// A cached SVG handle for the given icon name.
+pub fn handle(name: &str) -> svg::Handle {
+    static CACHE: OnceLock<HashMap<&'static str, svg::Handle>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| {
+        NAMES
+            .iter()
+            .map(|&n| (n, svg::Handle::from_memory(bytes(n))))
+            .collect()
+    });
+    cache
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| svg::Handle::from_memory(bytes(name)))
 }
 
 /// A tinted icon of the given pixel size.
