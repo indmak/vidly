@@ -3,8 +3,9 @@
 ;
 ; FFmpeg is bundled as separate files (LGPL build) and only installed when the
 ; target machine does not already provide ffmpeg + ffprobe on PATH.
+; Version is the 4-part MS Store version, e.g. 0.1.0.0 (passed from CI as <Cargo version>.0).
 #ifndef Version
-  #define Version "0.0.0"
+  #define Version "0.0.0.0"
 #endif
 
 [Setup]
