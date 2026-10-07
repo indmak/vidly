@@ -1,0 +1,38 @@
+[package]
+name = "vidly"
+version = "0.1.0"
+edition = "2021"
+description = "Vidly — lossless MP4/MOV container converter (remux, no re-encoding) powered by FFmpeg"
+license = "MIT"
+repository = "https://github.com/indmak/vidly"
+readme = "README.md"
+keywords = ["mp4", "mov", "ffmpeg", "converter", "remux"]
+categories = ["multimedia::video", "gui"]
+build = "build.rs"
+
+[dependencies]
+iced = { version = "0.13", features = ["tokio", "svg"] }
+tokio = { version = "1", features = ["rt", "process", "io-util", "fs", "sync", "macros"] }
+tokio-util = "0.7"
+futures = "0.3"
+# xdg-portal keeps the Linux/deb build free of the full GTK dependency chain.
+rfd = { version = "0.15", default-features = false, features = ["tokio", "xdg-portal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+thiserror = "2"
+opener = { version = "0.7", features = ["reveal"] }
+dark-light = "1"
+sys-locale = "0.3"
+png = "0.17"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+[build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

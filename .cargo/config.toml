@@ -1,0 +1,17 @@
+# Cargo configuration for the Vidly workspace.
+#
+# The proxy is intentionally NOT hard-coded here: a hard-coded proxy breaks every
+# build while the local proxy is offline. Instead run:
+#
+#     powershell -ExecutionPolicy Bypass -File scripts/dev.ps1 <cargo args>
+#
+# which probes direct connectivity first and only falls back to the local proxy
+# (http://127.0.0.1:3128 by default) when the network is unreachable.
+#
+# To force a proxy manually, uncomment:
+# [http]
+# proxy = "http://127.0.0.1:3128"
+
+# Flaky networks: retry a few times before giving up.
+[net]
+retry = 5

@@ -1,0 +1,181 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # manual run (does not upload a Release)
+
+permissions:
+  contents: write
+
+jobs:
+  # ══════════════════════ Windows ══════════════════════
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 版本号（Cargo.toml 为唯一来源）
+        shell: bash
+        run: |
+          VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "VER=$VER" >> "$GITHUB_ENV"
+      - run: cargo build --release
+      - name: 安装 MSYS2 工具链
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            make
+            nasm
+            xz
+            curl
+      - name: 构建极简 LGPL ffmpeg
+        shell: msys2 {0}
+        run: ./scripts/build-ffmpeg-min.sh
+      - name: 组装 dist/
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp out/bin/ffmpeg.exe  dist/
+          cp out/bin/ffprobe.exe dist/
+          cp out/bin/LICENSE-ffmpeg.txt dist/LICENSE-ffmpeg.txt
+          cp target/release/vidly.exe dist/
+          (cd dist && 7z a ../unsigned.zip vidly.exe ffmpeg.exe ffprobe.exe)
+      # ── SignPath pass 1: sign the application binaries ──────────────────────
+      # ⚠️ input/output parameter names follow the SignPath action README.
+      - name: SignPath 签名（应用文件）
+        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        uses: SignPath/github-action-signpath-action@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: vidly
+          signing-policy-slug: release-signing
+          input-artifact-path: unsigned.zip
+          output-artifact-path: signed.zip
+      - name: 解包签名结果回 dist/
+        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        shell: bash
+        run: 7z x signed.zip -odist -y
+      - name: Inno Setup 打安装包
+        shell: cmd
+        run: |
+          choco install innosetup -y --no-progress || exit /b 0
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DVersion=%VER% installer.iss
+      # ── SignPath pass 2: sign the installer ─────────────────────────────────
+      - name: SignPath 签名（安装包）
+        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        uses: SignPath/github-action-signpath-action@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: vidly
+          signing-policy-slug: release-signing
+          input-artifact-path: Output/Vidly-Setup-${{ env.VER }}.exe
+          output-artifact-path: Vidly-Setup-${{ env.VER }}.exe
+      - name: 收集产物
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [ -f Vidly-Setup-${VER}.exe ]; then cp Vidly-Setup-${VER}.exe artifacts/
+          else cp "Output/Vidly-Setup-${VER}.exe" artifacts/; fi   # fallback when signing is off
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: artifacts/ }
+
+  # ══════════════════════ macOS ══════════════════════
+  macos:
+    runs-on: macos-14 # Apple Silicon
+    env:
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      MACOS_P12_B64: ${{ secrets.MACOS_P12_B64 }}
+      MACOS_P12_PASSWORD: ${{ secrets.MACOS_P12_PASSWORD }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 版本号
+        run: |
+          VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "VER=$VER" >> "$GITHUB_ENV"
+      - name: 构建 LGPL ffmpeg（极简）
+        run: |
+          brew install nasm 2>/dev/null || true
+          ./scripts/build-ffmpeg-min.sh
+      - run: cargo build --release
+      - name: 生成 icns
+        run: ./scripts/make-icns.sh
+      - name: 导入签名证书到临时 keychain
+        if: ${{ secrets.MACOS_P12_B64 != '' }}
+        run: |
+          echo -n "$MACOS_P12_B64" | base64 --decode > cert.p12
+          security create-keychain -p temp build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p temp build.keychain
+          security import cert.p12 -k build.keychain \
+            -P "$MACOS_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k temp build.keychain
+      - run: chmod +x scripts/package-macos.sh && ./scripts/package-macos.sh "$VER"
+      - name: 收集产物
+        run: |
+          mkdir -p artifacts
+          cp dist/Vidly-${VER}.dmg artifacts/
+      - uses: actions/upload-artifact@v4
+        with: { name: macos, path: artifacts/ }
+
+  # ══════════════════════ Linux ══════════════════════
+  linux:
+    runs-on: ubuntu-22.04 # 22.04 keeps glibc compatibility broad
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 版本号
+        run: |
+          VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "VER=$VER" >> "$GITHUB_ENV"
+      - name: 构建
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev
+          cargo build --release
+      - name: 构建极简 LGPL ffmpeg
+        run: |
+          sudo apt-get install -y nasm
+          chmod +x scripts/build-ffmpeg-min.sh
+          ./scripts/build-ffmpeg-min.sh
+      - name: 组装 deb
+        run: |
+          chmod +x scripts/package-deb.sh
+          ./scripts/package-deb.sh "$VER" amd64
+      - name: 收集产物
+        run: |
+          mkdir -p artifacts
+          cp dist/vidly_${VER}_amd64.deb artifacts/
+      - uses: actions/upload-artifact@v4
+        with: { name: linux, path: artifacts/ }
+
+  # ══════════════════════ release ══════════════════════
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { merge-multiple: true, path: dist }
+      - name: 生成 Release
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Vidly $GITHUB_REF_NAME" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: 上传合规文件
+        run: |
+          gh release upload "$GITHUB_REF_NAME" LICENSE THIRD_PARTY.md --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
