@@ -1,5 +1,5 @@
 //! Custom theme (dark / light / follow-system) + component styles.
-//! See docs/UI设计规划.md.
+//! See docs/UI_DESIGN.md.
 // The theme module is a design-token library: not every variant is wired into the
 // UI yet (e.g. hover/pressed states, success progress bar), so unused items are fine.
 #![allow(dead_code)]
@@ -134,7 +134,7 @@ const DARK: Tokens = Tokens {
     warning: rgb(0xFB, 0xBF, 0x24),
 };
 
-// Light palette (docs/UI设计规划.md §9.1); accent darkened for contrast on white.
+// Light palette (docs/UI_DESIGN.md); accent darkened for contrast on white.
 const LIGHT: Tokens = Tokens {
     bg_base: rgb(0xF7, 0xF8, 0xFA),
     bg_surface: rgb(0xFF, 0xFF, 0xFF),
