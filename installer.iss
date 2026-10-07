@@ -1,21 +1,24 @@
-; Usage: ISCC /DVersion=x.y.z installer.iss
-; Output: Output/Vidly-Setup-x.y.z.exe
+; Usage: ISCC /DVersion=x.y.z.w installer.iss
+; Output: Output/Vidly-Setup-x.y.z.w.exe
 ;
 ; FFmpeg is bundled as separate files (LGPL build) and only installed when the
 ; target machine does not already provide ffmpeg + ffprobe on PATH.
-; Version is the 4-part MS Store version, e.g. 0.1.0.0 (passed from CI as <Cargo version>.0).
+; NOTE: Inno Setup does not support trailing comments on directive lines.
+
 #ifndef Version
   #define Version "0.0.0.0"
 #endif
 
 [Setup]
-AppId={{3F9C1A54-7B2E-4D86-9A17-C05E4412B780}}   ; generate once, never change (upgrades key off it)
+; Generate the AppId once, then never change it (upgrades key off it).
+AppId={{3F9C1A54-7B2E-4D86-9A17-C05E4412B780}}
 AppName=Vidly
 AppVersion={#Version}
 AppPublisher=indmak
 AppPublisherURL=https://github.com/indmak/vidly
 DefaultDirName={autopf}\Vidly
-PrivilegesRequired=lowest          ; install to the user dir: no UAC, cleaner uninstall
+; Install to the user dir: no UAC, cleaner uninstall.
+PrivilegesRequired=lowest
 OutputBaseFilename=Vidly-Setup-{#Version}
 SetupIconFile=assets\vidly.ico
 UninstallDisplayIcon={app}\vidly.exe
@@ -25,9 +28,9 @@ WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
-Source: "dist\vidly.exe";          DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\ffmpeg.exe";         DestDir: "{app}"; Flags: ignoreversion; Check: NeedsFfmpeg
-Source: "dist\ffprobe.exe";        DestDir: "{app}"; Flags: ignoreversion; Check: NeedsFfmpeg
+Source: "dist\vidly.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: NeedsFfmpeg
+Source: "dist\ffprobe.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: NeedsFfmpeg
 Source: "dist\LICENSE-ffmpeg.txt"; DestDir: "{app}"; Flags: ignoreversion; Check: NeedsFfmpeg
 
 [Tasks]
@@ -35,7 +38,7 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 
 [Icons]
 Name: "{autoprograms}\Vidly"; Filename: "{app}\vidly.exe"
-Name: "{autodesktop}\Vidly";  Filename: "{app}\vidly.exe"; Tasks: desktopicon
+Name: "{autodesktop}\Vidly"; Filename: "{app}\vidly.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\vidly.exe"; Description: "立即运行"; Flags: nowait postinstall skipifsilent
