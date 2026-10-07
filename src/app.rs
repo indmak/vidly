@@ -43,6 +43,10 @@ pub struct Item {
     pub output: PathBuf, // finalized only at launch, according to the overwrite policy
     pub target: Container, // per-item target container (editable in the queue)
     pub size: u64,       // input file size in bytes (0 when unknown)
+    // Cached display strings (recomputed only when input/output change, not per frame).
+    pub name: String,
+    pub out_name: String,
+    pub path_label: String,
     pub started: Option<Instant>,
     pub phase: Phase,
 }
@@ -183,7 +187,7 @@ impl App {
                         Phase::Queued | Phase::Failed(_) | Phase::Canceled | Phase::Skipped
                     ) {
                         let ext = resolve_ext(c, &item.input);
-                        item.output = util::planned_output(&item.input, dir.as_deref(), ext);
+                        set_output(item, util::planned_output(&item.input, dir.as_deref(), ext));
                     }
                 }
                 Task::none()
@@ -223,7 +227,7 @@ impl App {
                     item.phase = Phase::Queued;
                     item.started = None;
                     let ext = resolve_ext(item.target, &item.input);
-                    item.output = util::planned_output(&item.input, dir.as_deref(), ext);
+                    set_output(item, util::planned_output(&item.input, dir.as_deref(), ext));
                 }
                 self.start()
             }
@@ -430,7 +434,8 @@ impl App {
             // Never write over the source file itself (that would corrupt / destroy
             // the original) — force a unique name regardless of the overwrite policy.
             if item.output == item.input {
-                item.output = util::unique_path(item.output.clone());
+                let renamed = util::unique_path(item.output.clone());
+                set_output(item, renamed);
             }
             // Apply the overwrite policy only now.
             match self.config.overwrite {
@@ -439,7 +444,10 @@ impl App {
                     item.started = None;
                     continue;
                 }
-                OverwritePolicy::Rename => item.output = util::unique_path(item.output.clone()),
+                OverwritePolicy::Rename => {
+                    let renamed = util::unique_path(item.output.clone());
+                    set_output(item, renamed);
+                }
                 _ => {}
             }
             let req = Request {
@@ -492,12 +500,28 @@ impl App {
             let target = Container::default_for(&p);
             let output =
                 util::planned_output(&p, self.config.output_dir.as_deref(), resolve_ext(target, &p));
+            let name = p
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let out_name = output
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let path_label = if size > 0 {
+                format!("{} · {}", p.display(), util::human_size(size))
+            } else {
+                p.display().to_string()
+            };
             self.items.push(Item {
                 id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
                 input: p,
                 output,
                 target,
                 size,
+                name,
+                out_name,
+                path_label,
                 started: None,
                 phase: Phase::Queued,
             });
@@ -519,7 +543,7 @@ impl App {
                 Phase::Queued | Phase::Failed(_) | Phase::Canceled | Phase::Skipped
             ) {
                 let ext = resolve_ext(item.target, &item.input);
-                item.output = util::planned_output(&item.input, dir.as_deref(), ext);
+                set_output(item, util::planned_output(&item.input, dir.as_deref(), ext));
             }
         }
     }
@@ -914,16 +938,29 @@ impl App {
 
 // ---------- component styles ----------
 fn primary(t: &Theme, status: button::Status) -> button::Style {
+    let k = theme::tokens();
     match status {
         button::Status::Hovered => theme::primary_button_hovered(t),
+        button::Status::Pressed => {
+            let mut style = theme::primary_button(t);
+            style.background = Some(Color { a: 0.85, ..k.accent }.into());
+            style
+        }
         button::Status::Disabled => disabled_button(),
         _ => theme::primary_button(t),
     }
 }
 
 fn secondary(t: &Theme, status: button::Status) -> button::Style {
+    let k = theme::tokens();
     match status {
         button::Status::Hovered => theme::secondary_button_hovered(t),
+        button::Status::Pressed => {
+            let mut style = theme::secondary_button(t);
+            style.background = Some(k.bg_input.into());
+            style.border.color = k.accent;
+            style
+        }
         button::Status::Disabled => disabled_button(),
         _ => theme::secondary_button(t),
     }
@@ -1096,7 +1133,16 @@ fn resolve_ext(target: Container, input: &Path) -> &'static str {
     }
 }
 
-fn item_view(item: &Item, hovered: bool) -> Element<'static, Message> {
+/// Sets an item's output path and keeps the cached display name in sync.
+fn set_output(item: &mut Item, output: PathBuf) {
+    item.out_name = output
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    item.output = output;
+}
+
+fn item_view(item: &Item, hovered: bool) -> Element<'_, Message> {
     let k = theme::tokens();
     let (icon_name, status) = match &item.phase {
         Phase::Queued => ("clock", i18n::t("st_waiting")),
@@ -1116,18 +1162,7 @@ fn item_view(item: &Item, hovered: bool) -> Element<'static, Message> {
         Phase::Canceled => k.text_disabled,
         Phase::Skipped => k.warning,
     };
-    let name = item
-        .input
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let out_name = item
-        .output
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-
-    let info: Element<'static, Message> = match &item.phase {
+    let info: Element<'_, Message> = match &item.phase {
         Phase::Running { progress } => {
             let p = *progress;
             let eta = item.started.map(|s| {
@@ -1155,24 +1190,17 @@ fn item_view(item: &Item, hovered: bool) -> Element<'static, Message> {
             .spacing(2)
             .into()
         }
-        _ => {
-            let size = if item.size > 0 {
-                format!(" · {}", util::human_size(item.size))
-            } else {
-                String::new()
-            };
-            text(format!("{}{size}", item.input.display()))
-                .size(11)
-                .width(Length::Fill)
-                .wrapping(text::Wrapping::Word)
-                .style(theme::secondary_text)
-                .into()
-        }
+        _ => text(item.path_label.as_str())
+            .size(11)
+            .width(Length::Fill)
+            .wrapping(text::Wrapping::Word)
+            .style(theme::secondary_text)
+            .into(),
     };
 
     let body = column![
         row![
-            text(format!("{name} → {out_name}"))
+            text(format!("{} → {}", item.name, item.out_name))
                 .size(13)
                 .width(Length::Fill)
                 .wrapping(text::Wrapping::Word),

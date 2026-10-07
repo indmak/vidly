@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use iced::{
@@ -161,18 +162,24 @@ pub fn tokens() -> &'static Tokens {
 // ───────────────────────── Custom theme ─────────────────────────
 pub fn theme() -> theme::Theme {
     use iced::theme::Palette;
-    let k = tokens();
-    let name = if resolved() == ThemeMode::Light { "Vidly Light" } else { "Vidly Dark" };
-    theme::Theme::custom(
-        name.into(),
-        Palette {
-            background: k.bg_base,
-            text: k.text_primary,
-            primary: k.accent,
-            success: k.success,
-            danger: k.error,
-        },
-    )
+    static DARK: OnceLock<theme::Theme> = OnceLock::new();
+    static LIGHT: OnceLock<theme::Theme> = OnceLock::new();
+    let light = resolved() == ThemeMode::Light;
+    let slot = if light { &LIGHT } else { &DARK };
+    slot.get_or_init(|| {
+        let k = tokens();
+        theme::Theme::custom(
+            (if light { "Vidly Light" } else { "Vidly Dark" }).into(),
+            Palette {
+                background: k.bg_base,
+                text: k.text_primary,
+                primary: k.accent,
+                success: k.success,
+                danger: k.error,
+            },
+        )
+    })
+    .clone()
 }
 
 // ───────────────────────── Style functions ─────────────────────────
