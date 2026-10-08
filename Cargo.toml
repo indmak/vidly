@@ -11,7 +11,7 @@ categories = ["multimedia::video", "gui"]
 build = "build.rs"
 
 [dependencies]
-iced = { version = "0.13", features = ["tokio", "svg", "lazy"] }
+iced = { version = "0.13", features = ["tokio", "svg"] }
 tokio = { version = "1", features = ["rt", "process", "io-util", "fs", "sync", "macros"] }
 tokio-util = "0.7"
 futures = "0.3"

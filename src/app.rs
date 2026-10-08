@@ -8,8 +8,8 @@ use futures::SinkExt;
 use iced::{
     alignment::{Horizontal, Vertical},
     widget::{
-        button, checkbox, column, container, horizontal_space, lazy, mouse_area, pick_list,
-        progress_bar, row, scrollable, slider, text, tooltip, Column,
+        button, checkbox, column, container, horizontal_space, mouse_area, pick_list, progress_bar,
+        row, scrollable, slider, text, tooltip, Column,
     },
     Border, Color, Element, Font, Length, Subscription, Task, Theme,
 };
@@ -728,12 +728,7 @@ impl App {
                 Column::with_children(
                     self.items
                         .iter()
-                        .map(|i| {
-                            let hovered = self.hovered == Some(i.id);
-                            // `lazy` caches the row element and only rebuilds it when
-                            // the item (or its hover state) actually changes.
-                            lazy(item_key(i, hovered), move |_| item_view(i, hovered)).into()
-                        })
+                        .map(|i| item_view(i, self.hovered == Some(i.id)))
                         .collect::<Vec<_>>(),
                 )
                 .spacing(10),
@@ -1140,35 +1135,6 @@ fn resolve_ext(target: Container, input: &Path) -> &'static str {
         Container::Auto => util::auto_target(input),
         c => c.ext(),
     }
-}
-
-/// Hash of everything that affects an item row's rendering. Used as the `lazy`
-/// dependency so unchanged rows are not rebuilt each frame.
-fn item_key(item: &Item, hovered: bool) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    item.id.hash(&mut h);
-    hovered.hash(&mut h);
-    item.out_name.hash(&mut h);
-    (item.target as u8).hash(&mut h);
-    match &item.phase {
-        Phase::Queued => 0u8.hash(&mut h),
-        Phase::Running { progress } => {
-            1u8.hash(&mut h);
-            progress.to_bits().hash(&mut h);
-        }
-        Phase::Done { secs } => {
-            2u8.hash(&mut h);
-            secs.to_bits().hash(&mut h);
-        }
-        Phase::Failed(e) => {
-            3u8.hash(&mut h);
-            e.hash(&mut h);
-        }
-        Phase::Canceled => 4u8.hash(&mut h),
-        Phase::Skipped => 5u8.hash(&mut h),
-    }
-    h.finish()
 }
 
 /// Sets an item's output path and keeps the cached display name in sync.
