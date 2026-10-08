@@ -37,6 +37,13 @@ fi
 
 cd "ffmpeg-${VER}"
 
+# On Windows (MSYS2/MinGW) statically link the MinGW runtime, otherwise the
+# binaries need libwinpthread-1.dll / libgcc_s on the target machine.
+CONFIGURE_EXTRA=()
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) CONFIGURE_EXTRA+=(--extra-ldexeflags=-static) ;;
+esac
+
 # Remux only: container demuxers/muxers + the bitstream filters ffmpeg may need
 # when copying streams between mp4/mov/mkv/webm. No encoders, no network, no GPL.
 ./configure \
@@ -54,7 +61,8 @@ cd "ffmpeg-${VER}"
     --enable-demuxer=mov,matroska,mpegts,avi \
     --enable-muxer=mov,mp4,matroska,webm,ipod \
     --enable-bsf=null,extract_extradata,aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb \
-    --enable-parser=aac,ac3,mpegaudio,h264,hevc,vp8,vp9,av1,opus,vorbis
+    --enable-parser=aac,ac3,mpegaudio,h264,hevc,vp8,vp9,av1,opus,vorbis \
+    ${CONFIGURE_EXTRA[@]+"${CONFIGURE_EXTRA[@]}"}
 
 make -j"$JOBS"
 

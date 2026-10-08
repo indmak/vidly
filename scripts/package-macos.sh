@@ -50,9 +50,15 @@ else
     echo "⚠️ 未提供 MACOS_SIGN_IDENTITY，跳过签名（产物未签名，用户需右键打开）"
 fi
 
-# ── 2. DMG ──────────────────────────────────────────────────────────────────
-hdiutil create -volname "Vidly" -srcfolder "$APP" -ov -format UDZO \
+# ── 2. DMG (with an /Applications shortcut for drag-to-install) ─────────────
+STAGE="dist/dmg-stage"
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
+cp -R "$APP" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -volname "Vidly" -srcfolder "$STAGE" -ov -format UDZO \
     "dist/Vidly-${VER}.dmg"
+rm -rf "$STAGE"
 
 # ── 3. Notarize + staple (p8 is prepared by the caller in CI) ───────────────
 if [[ -n "${APPLE_API_KEY_ID:-}" && -n "${APPLE_API_KEY_B64:-}" ]]; then
