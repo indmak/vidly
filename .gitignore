@@ -1,6 +1,7 @@
 /target
 /dist
 /out
+/build
 /package
 /docs-zh
 /store
